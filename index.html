@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+  <meta charset="UTF-8">
+  <title>读书记录统计分析</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { font-family</div>: 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif; margin: 0; background: #f8f9fa; color: #222; }
+.container { 
+    max-width: 800px; /* 原1200/1.5 */
+    margin: 32px auto; 
+    padding: 24px; 
+    background: #fff; 
+    border-radius: 18px; 
+    box-shadow: 0 3px 18px #eee;
+    /* transform: scale(0.7);          */
+    transform-origin: top center;    /* 缩放基点 */
+  }    
+    h1 { margin-bottom: 14px; }
+    h2 { border-left: 5px solid #27a9e3; padding-left: 12px; color: #27a9e3; margin-top: 2.6em;}
+    input[type="file"] { margin-bottom: 24px; }
+    table { border-collapse: collapse; width: 100%; background: #fff; margin-top: 1em;}
+    th, td { border: 1px solid #e2e8f0; padding: 9px 6px; text-align: left; font-size: 14px;}
+    th { background: #f1f5f9; }
+    .stat-card { display: inline-block; padding: 18px 30px; margin: 8px 24px 8px 0; border-radius: 15px; background: #f3f7fb; min-width: 180px; text-align: center; }
+    .stat-card strong { font-size: 1.7em; color: #226dc6; }
+    .year-group { margin-bottom: 2em;}
+    /* 热力图核心样式 */
+    .heatmap-daybox {
+      width: 13px;
+      height: 13px;
+      margin: 2px 2.5px;
+      border-radius: 3px;
+      background: #eee;
+      transition: background .25s;
+      display: inline-block;
+    }
+    .heatmap-level0 { background: #eee; }
+    .heatmap-level1 { background: #bbe1fa; }
+    .heatmap-level2 { background: #63b3ed; }
+    .heatmap-level3 { background: #2186d6; }
+    .heatmap-level4 { background: #1765a5; }
+    
+    @media (max-width: 900px) {
+      .container { padding: 7vw 1vw; max-width: 99vw; }
+      .heatmap-month { width: 80vw!important; }
+    }
+    
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>读书记录智能统计分析</h1>
+  <p>上传 Kindle <b>My Clippings.txt</b>（或同格式）文件，自动解析并统计：</p>
+  <input type="file" id="fileInput" accept=".txt" />
+  <p>上传 <b>补充json数据.json</b>（或同格式）文件，自动解析并统计：</p>
+  <input type="file" id="appendfileInput" accept=".json" />
+
+  <div id="stats"></div>
+  <div id="book-table"></div>
+  <div id="year-summary"></div>
+  <div id="month-summary"></div>
+  <div id="heatmap"></div>
+</div>
+
+<script>
+/* 工具函数 */
+function parseChineseDatetime(s) {
+  s = s.replace('上午', 'AM').replace('下午', 'PM').replace('晚上', 'PM').replace('中午', 'PM');
+  let match = s.match(/(\d{4})年(\d{1,2})月(\d{1,2})日\s+(AM|PM)(\d{1,2}):(\d{2}):(\d{2})/);
+  if (!match) return null;
+  let [_, y, m, d, ap, H, M, S] = match;
+  H = parseInt(H,10);
+  if(ap === "PM" && H < 12) H += 12;
+  if(ap === "AM" && H === 12) H = 0;
+  let date = new Date(+y, m-1, +d, H, +M, +S);
+  return date;
+}
+function formatDuration(s) {
+  let sec = Math.floor(s / 1000);
+  let h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60), sec2 = sec%60;
+  if(h) return `${h}小时${m}分`;
+  if(m) return `${m}分${sec2}秒`;
+  return `${sec2}秒`;
+}
+function formatDate(d) {
+  if (!d) return "";
+  let dt = new Date(d);
+  return `${dt.getFullYear()}-${dt.getMonth()+1}-${dt.getDate()}`;
+}
+function daysBetween(a, b) {
+  return Math.floor((b-a)/(1000*3600*24));
+}
+function getDateKey(d) {
+  return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`;
+}
+
+/* 主解析函数：参照你的python代码 */
+function parseClippings(text) {
+  let sessions = [];
+  let blocks = text.split(/={10,}|={2,}/);
+  let current = {};
+  for (let block of blocks) {
+    let lines = block.trim().split('\n').map(l=>l.trim()).filter(Boolean);
+    if(!lines.length || lines[0].indexOf('[阅读记录]') === -1) continue;
+    let nameMatch = /^\[阅读记录\](.+)/.exec(lines[0]);
+    let name = nameMatch ? nameMatch[1].trim() : "未知书籍";
+    let tsLine = lines.find(l=>l.indexOf("添加于")!==-1) || "";
+    let tsMatch = /添加于 (.+?)星期. ([上下晚中]午[0-9:]+(?:\:[0-9]+)?)/.exec(tsLine);
+    if(!tsMatch) continue;
+    let dt = parseChineseDatetime(tsMatch[1] + " " + tsMatch[2]);
+    if(!dt) continue;
+    let status = lines[lines.length-1].trim();
+    if(status === "1") {
+      current = {name: name, start: dt};
+    } else if(status === "2" && current.start) {
+      current.end = dt;
+      sessions.push({...current});
+      current = {};
+    } else if(status === "3") {
+      sessions.push({name: name, done: true});
+    }
+  }
+  return sessions;
+}
+
+// 解析json数组字符串，转换start/end为Date对象
+function parseClippingsJson(jsonArr) {
+  // 支持字符串或已解析对象
+  let arr = typeof jsonArr === "string" ? JSON.parse(jsonArr) : jsonArr;
+  return arr.map(item => {
+    let obj = {...item};
+    if (obj.start) obj.start = new Date(obj.start.replace(/-/g, '/'));
+    if (obj.end) obj.end = new Date(obj.end.replace(/-/g, '/'));
+    return obj;
+  });
+}
+
+/* 生成数据报表 */
+function analyzeSessions(sessions) {
+  // 清除之前的解析后json
+  const statsElem = document.getElementById('stats');
+  const prevDetails = statsElem.previousElementSibling;
+  if (prevDetails && prevDetails.tagName === 'DETAILS') {
+    prevDetails.remove();
+  }
+  statsElem.insertAdjacentHTML('beforebegin', 
+    `<details style="margin-bottom:1em;"><summary style="cursor:pointer;color:#2898f5;">查看解析后JSON数据</summary>
+      <pre style="max-height:320px;overflow:auto;background:#f7f7fa;border-radius:8px;padding:12px 16px;font-size:13px;">${JSON.stringify(sessions, null, 2)}</pre>
+    </details>`
+  );
+  let bookStats = {}, yearStats = {}, monthStats = {}, dailyStats = {};
+  // 先统计所有已完成书籍
+  let finishedBooks = new Set();
+  for(let s of sessions) {
+    if(s.done) { finishedBooks.add(s.name); }
+  }
+  // 再统计 session
+  for(let s of sessions) {
+    if(s.done) continue;
+    let name = s.name;
+    if(!s.start || !s.end) continue;
+    let dur = s.end - s.start;
+    if(dur < 0 || dur > 1000*3600*24*2) continue; // >2天的数据忽略
+    // 书籍维度
+    if(!bookStats[name]) bookStats[name] = {name, total:0, days: new Set(), min: s.start, max: s.end};
+    bookStats[name].total += dur;
+    bookStats[name].days.add(getDateKey(s.start));
+    if(s.start < bookStats[name].min) bookStats[name].min = s.start;
+    if(s.end > bookStats[name].max) bookStats[name].max = s.end;
+    // 年/月维度
+    let y = s.start.getFullYear(), m = s.start.getMonth()+1;
+    if(!yearStats[y]) yearStats[y] = {year:y, total:0, days: new Set(), books: {}, finished: new Set(), sessions:0};
+    yearStats[y].total += dur;
+    yearStats[y].days.add(getDateKey(s.start));
+    yearStats[y].sessions++;
+    if(!yearStats[y].books[name]) yearStats[y].books[name] = 0;
+    yearStats[y].books[name] += dur;
+    if(finishedBooks.has(name)) yearStats[y].finished.add(name);
+    // 月维度
+    let ym = `${y}-${m}`;
+    if(!monthStats[ym]) monthStats[ym] = {month:ym, total:0, days: new Set(), books:{}, finished: new Set(), sessions:0};
+    monthStats[ym].total += dur;
+    monthStats[ym].days.add(getDateKey(s.start));
+    monthStats[ym].sessions++;
+    if(!monthStats[ym].books[name]) monthStats[ym].books[name]=0;
+    monthStats[ym].books[name]+=dur;
+    if(finishedBooks.has(name)) monthStats[ym].finished.add(name);
+    // 日热力图
+    let day = getDateKey(s.start);
+    if(!dailyStats[day]) dailyStats[day] = 0;
+    dailyStats[day] += dur;
+  }
+  // 补全年度、月度完成/在读数据
+  Object.values(yearStats).forEach(y=>{
+    y.finishedNum = y.finished.size;
+    y.readNum = Object.keys(y.books).length;
+    let [maxBook,maxDur]=["",0];
+    for(let [k,v] of Object.entries(y.books)){ if(v>maxDur){maxDur=v;maxBook=k;} }
+    y.bestBook = maxBook;
+    y.bestBookDur = maxDur;
+    y.dayCount = y.days.size;
+  });
+  Object.values(monthStats).forEach(m=>{
+    m.finishedNum = m.finished.size;
+    m.readNum = Object.keys(m.books).length;
+    let [maxBook,maxDur]=["",0];
+    for(let [k,v] of Object.entries(m.books)){ if(v>maxDur){maxDur=v;maxBook=k;} }
+    m.bestBook = maxBook;
+    m.bestBookDur = maxDur;
+    m.dayCount = m.days.size;
+  });
+  // 书籍维度
+  Object.values(bookStats).forEach(b=>{
+    b.dayCount = b.days.size;
+  });
+  // 连续阅读天数
+  let dayList = Object.keys(dailyStats).sort();
+  let maxStreak = 0, curStreak = 0, nowStreak = 0, prev = null;
+  for(let d of dayList) {
+    if(prev && daysBetween(new Date(prev), new Date(d))===1) {
+      curStreak++;
+    } else {
+      curStreak=1;
+    }
+    if(curStreak>maxStreak) maxStreak=curStreak;
+    prev = d;
+  }
+  // 当前持续天数
+  let nowStreakCalc = 1;
+  for(let i=dayList.length-1; i>0; i--) {
+    if(daysBetween(new Date(dayList[i-1]), new Date(dayList[i])) === 1) {
+      nowStreakCalc++;
+    } else {
+      break;
+    }
+  }
+  return {
+    bookStats: Object.values(bookStats).sort((a,b)=>b.total-a.total),
+    yearStats: Object.values(yearStats).sort((a,b)=>b.year-b.year),
+    monthStats: Object.values(monthStats).sort((a,b)=>b.month<b.month?1:-1),
+    dailyStats,
+    maxStreak,
+    nowStreak: nowStreakCalc
+  };
+}
+
+/* 生成表格HTML */
+function genBookTable(books) {
+  if (!books.length) return '';
+  // 按阅读时长降序取前10本
+  const topBooks = books
+    .slice()
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 10);
+  // 找最大时长用于进度条
+  const maxTotal = Math.max(...topBooks.map(b => b.total));
+  // 生成列表
+  let rows = topBooks.map(b => {
+    // 进度条宽度与阅读时长成比例
+    const percent = maxTotal ? (b.total / maxTotal * 100) : 0;
+    return `
+      <li class="book-item" style="display:flex;align-items:center;margin-bottom:14px;padding-bottom:2px;background:#f7f8fa;border-radius:10px;padding:7px 9px 13px 9px;min-height:60px;">
+        <div class="book-info" style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;">
+          <div class="book-title" style="font-size:15px;font-weight:500;color:#2d3033;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px;">${b.name}</div>
+          <div class="book-extra" style="font-size:13px;color:#888;line-height:1.2;margin-bottom:2px;">${formatDuration(b.total)} · ${b.dayCount}天</div>
+          <div class="book-extra" style="font-size:12px;color:#bbb;">${formatDate(b.min)} ~ ${formatDate(b.max)}</div>
+          <div class="book-bar-wrap" style="width:100%;height:7px;background:#e7eaf0;border-radius:7px;margin-top:5px;position:relative;overflow:hidden;">
+            <div class="book-bar" style="height:100%;background:linear-gradient(90deg,#5ca7fa 0%,#a1d0fc 100%);border-radius:7px;transition:width 0.3s;width:${percent}%;"></div>
+          </div>
+        </div>
+      </li>
+    `;
+  }).join('');
+  return `
+    <h2>阅读最久</h2>
+    <ul class="book-list" style="margin:0;padding:0;list-style:none;">
+      ${rows}
+    </ul>
+    <style>
+      .book-title {font-size:15px;font-weight:500;color:#2d3033;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+      .book-extra {font-size:13px;color:#888;line-height:1.2;}
+      .book-bar-wrap {width:100%;height:7px;background:#e7eaf0;border-radius:7px;margin-top:5px;position:relative;overflow:hidden;}
+      .book-bar {height:100%;background:linear-gradient(90deg,#5ca7fa 0%,#a1d0fc 100%);border-radius:7px;transition:width 0.3s;}
+    </style>
+  `;
+}
+function genMonthSummary(months, dailyStats, yearStats) {
+  let years = {};
+  let yearsYears = {}
+  for(let m of months) {
+    let [y,mm] = m.month.split('-');
+    if(!years[y]) years[y]=[];
+    years[y].push(m);
+    yearsYears[y] = yearStats.find(yy => yy.year == y);
+  }
+
+  function renderYearHeatmap(currYear, yearStats) {
+    let daily = {};
+    for (let d of Object.keys(dailyStats)) {
+        let dt = new Date(d);
+        if (dt.getFullYear() !== Number(currYear)) continue;
+        daily[d] = dailyStats[d];
+    }
+    // 汇总年阅读天数
+    let readDays = Object.keys(daily).length;
+    let totalReadMs = Object.values(daily).reduce((a, b) => a + b, 0);
+    let totalReadStr = formatDuration(totalReadMs);
+
+    // 生成每月
+    let monthsArr = [];
+    for (let m = 0; m < 12; m++) {
+        // 该月第一天
+        let firstDay = new Date(currYear, m, 1);
+        // 该月天数
+        let lastDay = new Date(currYear, m + 1, 0).getDate();
+        let weeks = [];
+        let week = [];
+        // 头部补全
+        let wd = firstDay.getDay() === 0 ? 6 : firstDay.getDay() - 1;
+        for (let i = 0; i < wd; i++) week.push(null); // 用null占位，后面不渲染
+        // 填充每一天
+        for (let d = 1; d <= lastDay; d++) {
+            let dateStr = `${currYear}-${m + 1}-${d}`;
+            let key = dateStr;
+            let dur = daily[key] || 0;
+            let level = dur === 0 ? 0 : dur < 10 * 60 * 1000 ? 1 : dur < 30 * 60 * 1000 ? 2 : dur < 60 * 60 * 1000 ? 3 : 4;
+            week.push(`<div class="heatmap-daybox heatmap-level${level}" title="${dateStr}${dur ? ' ' + formatDuration(dur) : ''}"></div>`);
+            if (week.length === 7) { weeks.push(week); week = []; }
+        }
+        if (week.length) { while (week.length < 7) week.push(null); weeks.push(week); }
+        monthsArr.push({ m, weeks, firstDay: wd, lastDay });
+    }
+
+    // 读过书籍列表
+    const readBooksArr = Object.keys(yearsYears[currYear].books || {});
+    // 读完书籍列表
+    const finishedBooksSet = new Set();
+    yearsYears[currYear].finished.forEach(b => finishedBooksSet.add(b));
+    const finishedBooksArr = Array.from(finishedBooksSet);
+
+
+    // 输出HTML
+    let html = `
+    <div style="margin-top:16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
+        <div style="color:#555;font-size:1em;">
+          读过  <span style="color:#2898f5;font-size:1.4em;cursor:pointer;text-decoration:underline;" onclick='showBookList("读过的书籍", ${JSON.stringify(readBooksArr)})'>${yearsYears[currYear]?.readNum || 0}</span> 本，
+          读完  <span style="color:#2898f5;font-size:1.4em;cursor:pointer;text-decoration:underline;" onclick='showBookList("读完的书籍", ${JSON.stringify(finishedBooksArr)})'>${yearsYears[currYear]?.finishedNum || 0}</span> 本，
+          阅读天数  <span style="color:#2898f5;font-size:1.4em">${readDays}</span> 天，
+          累计阅读  <span style="color:#2898f5;font-size:1.4em">${(totalReadMs/3600000).toFixed(1)}</span> 小时，
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
+        <div style="color:#555;font-size:1em;">
+          年度书籍：<span style="color:#2898f5;font-size:1.4em">${yearsYears[currYear]?.bestBook || '-'}</span>
+          ${yearsYears[currYear]?.bestBook ? `（${formatDuration(yearsYears[currYear]?.bestBookDur)}）` : ''}
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;flex-wrap:nowrap;margin-top:20px;">
+    `;
+
+    // 每行6个月
+    for (let row = 0; row < 2; row++) {
+        html += `<div style="display:flex;flex-wrap:nowrap;justify-content:space-between;margin-bottom:10px;">`;
+        for (let i = row * 6; i < (row + 1) * 6; i++) {
+            let m = monthsArr[i];
+            let active = m.weeks.flat().some(x => x && x.includes("heatmap-level") && !x.includes("heatmap-level0"));
+            html += `<div class="heatmap-month" style="width:120px;margin-bottom:28px;">`;
+            html += `<div style="text-align:left;font-size:1.08em;font-weight:600;margin-bottom:6px;color:${active ? "#222" : "#c6c6c6"};">${i + 1}月</div>`;
+            // 不再展示周几标题
+            // 每周
+            for (let widx = 0; widx < m.weeks.length; widx++) {
+                let w = m.weeks[widx];
+                html += `<div style="display:flex;">`;
+                for (let d = 0; d < 7; d++) {
+                    // 第一行的前置空格不渲染
+                    if (widx === 0 && d < m.firstDay) {
+                        html += `<div style="width:13px;height:13px;margin:2px 2.5px;"></div>`;
+                    } else if (widx === m.weeks.length - 1 && (w.filter(x=>x!==null).length + m.firstDay + (7-w.length)) < 7 && w[d] === null) {
+                        // 最后一行多余的空格不渲染
+                        html += `<div style="width:13px;height:13px;margin:2px 2.5px;"></div>`;
+                    } else {
+                        html += w[d] || `<div style="width:13px;height:13px;margin:2px 2.5px;"></div>`;
+                    }
+                }
+                html += `</div>`;
+            }
+            html += `</div>`;
+        }
+        html += `</div>`;
+    }
+    html += '</div></div>';
+    return html;
+}
+
+  let html = '';
+  for(let y of Object.keys(years).sort((a,b)=>b-a)) {
+    html += `<div class="year-group"><h2>${y}年 阅读统计</h2>`;
+    // 渲染热力图
+    html += `<div id="heatmap-main-container-${y}">${renderYearHeatmap(y, yearStats)}</div>`;
+    html += `</div>`;
+  }
+  return html;
+}
+
+/* 统计卡片 */
+/* 统计卡片 */
+      function genStatCard(stats) {
+        // 计算总起始日和结束日
+        const allDates = Object.keys(stats.dailyStats).sort();
+        const startDate = allDates[0] || '';
+        const endDate = allDates[allDates.length - 1] || '';
+        // 总读过/读完/天数
+        const totalRead = stats.bookStats.length;
+        const totalFinished = stats.yearStats.reduce((sum, y) => sum + (y.finishedNum || 0), 0);
+        const totalDays = allDates.length;
+        // 读过书籍列表
+        const readBooksArr = stats.bookStats.map(b => b.name);
+        // 读完书籍列表
+        const finishedBooksSet = new Set();
+        stats.yearStats.forEach(y => y.finished && y.finished.forEach(b => finishedBooksSet.add(b)));
+        const finishedBooksArr = Array.from(finishedBooksSet);
+
+        return `<div style="margin-top:16px;">
+      <div class="year-group"><h2>阅读总计</h2>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
+        <div style="color:#555;font-size:1em;">
+          最长连读  <span style="color:#2898f5;font-size:1.4em">${stats.maxStreak}</span> 天，
+          当前持续  <span style="color:#2898f5;font-size:1.4em">${stats.nowStreak}</span> 天，
+          阅读天数  <span style="color:#2898f5;font-size:1.4em">${totalDays}</span> 天
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
+        <div style="color:#555;font-size:1em;">
+          读过  <span style="color:#2898f5;font-size:1.4em;cursor:pointer;text-decoration:underline;" onclick='showBookList("读过的书籍", ${JSON.stringify(readBooksArr)})'>${totalRead}</span> 本，
+          读完  <span style="color:#2898f5;font-size:1.4em;cursor:pointer;text-decoration:underline;" onclick='showBookList("读完的书籍", ${JSON.stringify(finishedBooksArr)})'>${totalFinished}</span> 本
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
+        <div style="color:#555;font-size:1em;">
+          统计区间  <span style="color:#2898f5;font-size:1.4em">${startDate} ~ ${endDate}</span> 
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;flex-wrap:nowrap;margin-top:20px;">
+      </div>
+      </div></div>
+  `;
+}
+
+/* 入口：文件上传 */
+document.getElementById('fileInput').addEventListener('change', function(e){
+  if(!e.target.files.length) return;
+  let file = e.target.files[0];
+  let reader = new FileReader();
+  reader.onload = function(evt){
+    let text = evt.target.result;
+    let sessions = parseClippings(text);
+    window.sessions = sessions;
+    let stats = analyzeSessions(sessions);
+    document.getElementById('stats').innerHTML = genStatCard(stats);
+    document.getElementById('book-table').innerHTML = genBookTable(stats.bookStats);
+    document.getElementById('month-summary').innerHTML = genMonthSummary(stats.monthStats, stats.dailyStats, stats.yearStats);
+  };
+  reader.readAsText(file, 'utf-8');
+});
+document.getElementById('appendfileInput').addEventListener('change', function(e){
+  if(!e.target.files.length) return;
+  let file = e.target.files[0];
+  let reader = new FileReader();
+  reader.onload = function(evt){
+    let text = evt.target.result;
+    let newSessions = parseClippingsJson(text);
+    if (!Array.isArray(newSessions)) {
+      alert('补充json数据格式应为数组');
+      return;
+    }
+    if (!window.sessions) window.sessions = [];
+    // 追加新数据
+    window.sessions = window.sessions.concat(newSessions);
+    let sessions = window.sessions;
+    let stats = analyzeSessions(sessions);
+    document.getElementById('stats').innerHTML = genStatCard(stats);
+    document.getElementById('book-table').innerHTML = genBookTable(stats.bookStats);
+    document.getElementById('month-summary').innerHTML = genMonthSummary(stats.monthStats, stats.dailyStats, stats.yearStats);
+  };
+  reader.readAsText(file, 'utf-8');
+});
+function showBookList(title, books) {
+  let html = `<b>${title}</b><br>` + (Array.isArray(books) ? books.join('<br>') : books);
+  let div = document.createElement('div');
+  div.innerHTML = '<div style="position:fixed;left:0;top:0;width:100vw;height:100vh;z-index:9999;background:rgba(0,0,0,0.15);display:flex;align-items:center;justify-content:center;">' +
+    '<div style="background:#fff;padding:24px 32px;border-radius:12px;max-width:90vw;max-height:80vh;overflow:auto;box-shadow:0 6px 32px #888;">' +
+    html + '<br><br><button onclick="this.closest(\'div[style*=\\\'position:fixed\\\']\').remove()" style="margin-top:12px;padding:6px 18px;border-radius:6px;border:none;background:#2898f5;color:#fff;font-size:1em;cursor:pointer;">关闭</button></div></div>';
+  document.body.appendChild(div.firstChild);
+}
+</script>
+</body>
+</html>

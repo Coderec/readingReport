@@ -368,35 +368,33 @@ function genMonthSummary(months, dailyStats, yearStats) {
     `;
 
     // 每行6个月
-    for (let row = 0; row < 2; row++) {
-        html += `<div style="display:flex;flex-wrap:nowrap;justify-content:space-between;margin-bottom:10px;">`;
-        for (let i = row * 6; i < (row + 1) * 6; i++) {
-            let m = monthsArr[i];
-            let active = m.weeks.flat().some(x => x && x.includes("heatmap-level") && !x.includes("heatmap-level0"));
-            html += `<div class="heatmap-month" style="width:120px;margin-bottom:28px;">`;
-            html += `<div style="text-align:left;font-size:1.08em;font-weight:600;margin-bottom:6px;color:${active ? "#222" : "#c6c6c6"};">${i + 1}月</div>`;
-            // 不再展示周几标题
-            // 每周
-            for (let widx = 0; widx < m.weeks.length; widx++) {
-                let w = m.weeks[widx];
-                html += `<div style="display:flex;">`;
-                for (let d = 0; d < 7; d++) {
-                    // 第一行的前置空格不渲染
-                    if (widx === 0 && d < m.firstDay) {
-                        html += `<div style="width:13px;height:13px;margin:2px 2.5px;"></div>`;
-                    } else if (widx === m.weeks.length - 1 && (w.filter(x=>x!==null).length + m.firstDay + (7-w.length)) < 7 && w[d] === null) {
-                        // 最后一行多余的空格不渲染
-                        html += `<div style="width:13px;height:13px;margin:2px 2.5px;"></div>`;
-                    } else {
-                        html += w[d] || `<div style="width:13px;height:13px;margin:2px 2.5px;"></div>`;
-                    }
+    html += `<div style="display:flex;flex-wrap:wrap;justify-content:space-between;margin-bottom:10px;">`;
+    for (let i = 0; i < 12; i++) {
+        let m = monthsArr[i];
+        let active = m.weeks.flat().some(x => x && x.includes("heatmap-level") && !x.includes("heatmap-level0"));
+        html += `<div class="heatmap-month" style="width:120px;margin-bottom:28px;">`;
+        html += `<div style="text-align:left;font-size:1.08em;font-weight:600;margin-bottom:6px;color:${active ? "#222" : "#c6c6c6"};">${i + 1}月</div>`;
+        // 不再展示周几标题
+        // 每周
+        for (let widx = 0; widx < m.weeks.length; widx++) {
+            let w = m.weeks[widx];
+            html += `<div style="display:flex;">`;
+            for (let d = 0; d < 7; d++) {
+                // 第一行的前置空格不渲染
+                if (widx === 0 && d < m.firstDay) {
+                    html += `<div style="width:13px;height:13px;margin:2px 2.5px;"></div>`;
+                } else if (widx === m.weeks.length - 1 && (w.filter(x=>x!==null).length + m.firstDay + (7-w.length)) < 7 && w[d] === null) {
+                    // 最后一行多余的空格不渲染
+                    html += `<div style="width:13px;height:13px;margin:2px 2.5px;"></div>`;
+                } else {
+                    html += w[d] || `<div style="width:13px;height:13px;margin:2px 2.5px;"></div>`;
                 }
-                html += `</div>`;
             }
             html += `</div>`;
         }
         html += `</div>`;
     }
+    html += `</div>`;
     html += '</div></div>';
     return html;
 }

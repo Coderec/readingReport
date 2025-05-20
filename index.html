@@ -43,7 +43,7 @@
     
     @media (max-width: 900px) {
       .container { padding: 7vw 1vw; max-width: 99vw; }
-      .heatmap-month { width: 80vw!important; }
+      .heatmap-month { width: 45vw!important; }
     }
     
   </style>
@@ -368,11 +368,11 @@ function genMonthSummary(months, dailyStats, yearStats) {
     `;
 
     // 每行6个月
-    html += `<div style="display:flex;flex-wrap:wrap;justify-content:space-between;margin-bottom:10px;">`;
+    html += `<div style="display:flex;flex-wrap:wrap;justify-content:flex-start;margin-bottom:10px;">`;
     for (let i = 0; i < 12; i++) {
         let m = monthsArr[i];
         let active = m.weeks.flat().some(x => x && x.includes("heatmap-level") && !x.includes("heatmap-level0"));
-        html += `<div class="heatmap-month" style="width:120px;margin-bottom:28px;">`;
+        html += `<div class="heatmap-month" style="width:120px;margin-bottom:28px;margin-right:12px;">`;
         html += `<div style="text-align:left;font-size:1.08em;font-weight:600;margin-bottom:6px;color:${active ? "#222" : "#c6c6c6"};">${i + 1}月</div>`;
         // 不再展示周几标题
         // 每周

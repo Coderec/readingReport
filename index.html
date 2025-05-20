@@ -328,11 +328,11 @@ function genMonthSummary(months, dailyStats, yearStats) {
         for (let i = 0; i < wd; i++) week.push(null); // 用null占位，后面不渲染
         // 填充每一天
         for (let d = 1; d <= lastDay; d++) {
-            let dateStr = `${currYear}-${m + 1}-${d}`;
-            let key = dateStr;
+            let dateObj = new Date(currYear, m, d);
+            let key = getDateKey(dateObj); // 统一key格式
             let dur = daily[key] || 0;
             let level = dur === 0 ? 0 : dur < 10 * 60 * 1000 ? 1 : dur < 30 * 60 * 1000 ? 2 : dur < 60 * 60 * 1000 ? 3 : 4;
-            week.push(`<div class="heatmap-daybox heatmap-level${level}" title="${dateStr}${dur ? ' ' + formatDuration(dur) : ''}"></div>`);
+            week.push(`<div class="heatmap-daybox heatmap-level${level}" title="${key}${dur ? ' ' + formatDuration(dur) : ''}"></div>`);
             if (week.length === 7) { weeks.push(week); week = []; }
         }
         if (week.length) { while (week.length < 7) week.push(null); weeks.push(week); }

@@ -218,7 +218,7 @@ function analyzeSessions(sessions) {
   let dayList = Object.keys(dailyStats).sort();
   let maxStreak = 0, curStreak = 0, nowStreak = 0, prev = null;
   for(let d of dayList) {
-    if(prev && daysBetween(new Date(prev), new Date(d))===1) {
+    if(prev && daysBetween(new Date(prev.replace(/-/g, '/')), new Date(d.replace(/-/g, '/')) )===1) {
       curStreak++;
     } else {
       curStreak=1;
@@ -229,7 +229,7 @@ function analyzeSessions(sessions) {
   // 当前持续天数
   let nowStreakCalc = 1;
   for(let i=dayList.length-1; i>0; i--) {
-    if(daysBetween(new Date(dayList[i-1]), new Date(dayList[i])) === 1) {
+    if(daysBetween(new Date(dayList[i-1].replace(/-/g, '/')), new Date(dayList[i].replace(/-/g, '/'))) === 1) {
       nowStreakCalc++;
     } else {
       break;

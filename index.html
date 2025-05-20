@@ -85,7 +85,7 @@ function formatDuration(s) {
 }
 function formatDate(d) {
   if (!d) return "";
-  let dt = new Date(d);
+  let dt = typeof d === 'string' ? new Date(d.replace(/-/g, '/')) : new Date(d);
   return `${dt.getFullYear()}-${dt.getMonth()+1}-${dt.getDate()}`;
 }
 function daysBetween(a, b) {
@@ -298,7 +298,7 @@ function genMonthSummary(months, dailyStats, yearStats) {
   function renderYearHeatmap(currYear, yearStats) {
     let daily = {};
     for (let d of Object.keys(dailyStats)) {
-        let dt = new Date(d);
+        let dt = new Date(d.replace(/-/g, '/'));
         if (dt.getFullYear() !== Number(currYear)) continue;
         daily[d] = dailyStats[d];
     }

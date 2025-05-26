@@ -413,29 +413,36 @@ function genMonthSummary(months, dailyStats, yearStats) {
     // 每行6个月
     html += `<div style="display:flex;flex-wrap:wrap;justify-content:flex-start;margin-bottom:10px;">`;
     for (let i = 0; i < 12; i++) {
-        let m = monthsArr[i];
-        let active = m.weeks.flat().some(x => x && x.includes("heatmap-level") && !x.includes("heatmap-level0"));
-        html += `<div class="heatmap-month" style="width:120px;margin-bottom:28px;margin-right:12px;">`;
-        html += `<div style="text-align:left;font-size:1.08em;font-weight:600;margin-bottom:6px;cursor:pointer;color:${active ? "#222" : "#c6c6c6"};" onclick="showMonthDetail('${currYear}', '${i+1}')">${i + 1}月</div>`;
-        // 不再展示周几标题
-        // 每周
-        for (let widx = 0; widx < m.weeks.length; widx++) {
-            let w = m.weeks[widx];
-            html += `<div style="display:flex;">`;
-            for (let d = 0; d < 7; d++) {
-                // 第一行的前置空格不渲染
-                if (widx === 0 && d < m.firstDay) {
-                    html += `<div style="width:13px;height:13px;margin:2px 2.5px;"></div>`;
-                } else if (widx === m.weeks.length - 1 && (w.filter(x=>x!==null).length + m.firstDay + (7-w.length)) < 7 && w[d] === null) {
-                    // 最后一行多余的空格不渲染
-                    html += `<div style="width:13px;height:13px;margin:2px 2.5px;"></div>`;
-                } else {
-                    html += w[d] || `<div style="width:13px;height:13px;margin:2px 2.5px;"></div>`;
-                }
-            }
-            html += `</div>`;
+  let m = monthsArr[i];
+  let active = m.weeks.flat().some(x => x && x.includes("heatmap-level") && !x.includes("heatmap-level0"));
+  // 计算该月总时长（毫秒转小时，保留1位小数）
+  let ymKey = `${currYear}-${i + 1}`;
+  // 修正：直接从 months 查找
+  let monthObj = (years[currYear] || []).find(mm => mm.month === ymKey);
+  let monthTotal = monthObj ? (monthObj.total / 3600000).toFixed(1) : "0.0";
+  html += `
+    <div class="heatmap-month" style="width:120px;margin-bottom:28px;margin-right:12px;display:flex;flex-direction:column;align-items:stretch;">
+      <div style="display:flex;align-items:center;justify-content:space-between;width:100%;margin-bottom:2px;">
+        <div style="font-size:1.08em;font-weight:600;cursor:pointer;color:${active ? "#222" : "#c6c6c6"};" onclick="showMonthDetail('${currYear}', '${i+1}')">${i + 1}月</div>
+        <div style="font-size:0.98em;color:#888;text-align:right;flex:1;">${monthTotal}h</div>
+      </div>
+  `;
+      // 每周
+      for (let widx = 0; widx < m.weeks.length; widx++) {
+        let w = m.weeks[widx];
+        html += `<div style="display:flex;">`;
+        for (let d = 0; d < 7; d++) {
+          if (widx === 0 && d < m.firstDay) {
+            html += `<div style="width:13px;height:13px;margin:2px 2.5px;"></div>`;
+          } else if (widx === m.weeks.length - 1 && (w.filter(x=>x!==null).length + m.firstDay + (7-w.length)) < 7 && w[d] === null) {
+            html += `<div style="width:13px;height:13px;margin:2px 2.5px;"></div>`;
+          } else {
+            html += w[d] || `<div style="width:13px;height:13px;margin:2px 2.5px;"></div>`;
+          }
         }
         html += `</div>`;
+      }
+      html += `</div>`;
     }
     html += `</div>`;
     html += '</div></div>';
@@ -470,35 +477,57 @@ function genMonthSummary(months, dailyStats, yearStats) {
         stats.yearStats.forEach(y => y.finished && y.finished.forEach(b => finishedBooksSet.add(b)));
         const finishedBooksArr = Array.from(finishedBooksSet);
 
+        // 最近7天柱状图
+        const last7 = allDates.slice(-7);
+        const maxBar = Math.max(...last7.map(d => stats.dailyStats[d] || 0), 1);
+        const barChartHtml = `
+          <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:110px;width:90px;margin-left:18px;">
+            <div style="font-size:12px;color:#888;margin-bottom:6px;">最近7天</div>
+            <div style="display:flex;align-items:flex-end;height:70px;">
+              ${last7.map(d => {
+                const v = stats.dailyStats[d] || 0;
+                const h = Math.round((v / maxBar) * 60); // 最高60px
+                return `<div title="${d} ${v ? formatDuration(v) : '无'}" style="width:9px;height:${h}px;background:#5ca7fa;margin:0 3px;border-radius:3px 3px 0 0;transition:height .3s;"></div>`;
+              }).join('')}
+            </div>
+            <div style="display:flex;justify-content:space-between;width:100%;font-size:10px;color:#bbb;margin-top:4px;">
+              ${last7.map(d => `<span style="width:9px;display:inline-block;text-align:center;">${d.slice(-2)}</span>`).join('')}
+            </div>
+          </div>
+        `;
+
         return `<div style="margin-top:16px;">
-      <div class="year-group"><h2>阅读总计</h2>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
-        <div style="color:#555;font-size:1em;">
-          最长连读  <span style="color:#2898f5;font-size:1.4em">${stats.maxStreak}</span> 天，
-          当前持续  <span style="color:#2898f5;font-size:1.4em">${stats.nowStreak}</span> 天，
-          阅读天数  <span style="color:#2898f5;font-size:1.4em">${totalDays}</span> 天
-        </div>
+  <div class="year-group"><h2>阅读总计</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
+      <div style="color:#555;font-size:1em;">
+        最长连读  <span style="color:#2898f5;font-size:1.4em">${stats.maxStreak}</span> 天，
+        当前持续  <span style="color:#2898f5;font-size:1.4em">${stats.nowStreak}</span> 天，
+        阅读天数  <span style="color:#2898f5;font-size:1.4em">${totalDays}</span> 天
       </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
-        <div style="color:#555;font-size:1em;">
-          读过  <span style="color:#2898f5;font-size:1.4em;cursor:pointer;text-decoration:underline;"
-      onclick='showBookList("读过的书籍", JSON.parse(this.dataset.books))'
-      data-books='${JSON.stringify(stats.bookStats.map(b => ({name: b.name, total: b.total})))}'>${totalRead}</span> 本，
-          读完  <span style="color:#2898f5;font-size:1.4em;cursor:pointer;text-decoration:underline;"
-      onclick='showBookList("读完的书籍", JSON.parse(this.dataset.books))'
-      data-books='${JSON.stringify(stats.bookStats.filter(b => finishedBooksSet.has(b.name)).map(b => ({name: b.name, total: b.total})))}'>${totalFinished}</span> 本
-        </div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
+      <div style="color:#555;font-size:1em;">
+        读过  <span style="color:#2898f5;font-size:1.4em;cursor:pointer;text-decoration:underline;"
+    onclick='showBookList("读过的书籍", JSON.parse(this.dataset.books))'
+    data-books='${JSON.stringify(stats.bookStats.map(b => ({name: b.name, total: b.total})))}'>${totalRead}</span> 本，
+        读完  <span style="color:#2898f5;font-size:1.4em;cursor:pointer;text-decoration:underline;"
+    onclick='showBookList("读完的书籍", JSON.parse(this.dataset.books))'
+    data-books='${JSON.stringify(stats.bookStats.filter(b => finishedBooksSet.has(b.name)).map(b => ({name: b.name, total: b.total})))}'>${totalFinished}</span> 本
       </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
-        <div style="color:#555;font-size:1em;">
-          统计区间  <span style="color:#2898f5;font-size:1.4em">${startDate} ~ ${endDate}</span> 
-        </div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;">
+      <div style="color:#555;font-size:1em;">
+        统计区间  <span style="color:#2898f5;font-size:1.4em">${startDate} ~ ${endDate}</span> 
       </div>
-      <div style="display:flex;flex-direction:column;flex-wrap:nowrap;margin-top:20px;">
-      </div>
-      </div></div>
-  `;
-}
+    </div>
+    <div style="margin-top:24px;">
+      ${barChartHtml}
+    </div>
+    <div style="display:flex;flex-direction:column;flex-wrap:nowrap;margin-top:20px;">
+    </div>
+  </div>
+</div>`;
+      }
 
 /* 入口：文件上传 */
 document.getElementById('fileInput').addEventListener('change', function(e){
